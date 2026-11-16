@@ -148,6 +148,8 @@ spec: HTML; urlPrefix: https://html.spec.whatwg.org/
       text: settings object; url: settings-object
     for: module script
       text: realm loaded; url: concept-module-script-realm-loaded
+    for: realm
+      text: settings object; url: concept-realm-settings-object
   type: attr-value
     for: link/rel; text: prefetch; url: link-type-prefetch
     for: link/rel; text: preconnect; url: link-type-preconnect
@@ -1594,49 +1596,40 @@ such compilation or instantiation ought to be blocked.
 When instantiating a WebAssembly module that was loaded through the module
 system, WebAssembly additionally passes the host-defined value stored in the
 \[[HostDefined]] field of its WebAssembly Module Record. For HTML, this is its
-[=module script=].
+[=module script=]. No such value is passed when compiling bytes.
+
+Given a <a>realm</a> |realm| and an optional |hostDefined|, the
+implementation of {{HostEnsureCanCompileWasmBytes()}} is:
+
+1.  If |hostDefined| is given, execute
+    [[#can-instantiate-wasm-module-script]] on |realm| and |hostDefined|.
+
+2.  Otherwise, execute [[#can-compile-wasm-bytes]] on |realm|.
 
 <h4 id="can-compile-wasm-bytes" algorithm dfn export>
-  EnsureCSPDoesNotBlockWasmByteCompilation(|realm|, |script|)
+  EnsureCSPDoesNotBlockWasmByteCompilation|realm|
 </h4>
 
-Given a <a>realm</a> |realm|, and an optional [=module script=] |script|,
-this algorithm returns normally if compilation or instantiation is allowed,
-and throws a {{WebAssembly.CompileError}} if not:
+Given a <a>realm</a> |realm|,
+this algorithm returns normally if compilation is allowed, and throws a
+{{WebAssembly.CompileError}} if not:
 
-1.  If |script| is given, its [=module script/realm loaded=] is true, and its
-    [=script/settings object=]'s [=environment settings object's realm|realm=]
-    is |realm|, return.
+1.  Let |global| be |realm|'s [=realm/global object=].
 
-    Note: In this case |script| was fetched by |realm|, and so was already
-    checked against its policy. That check depends on the redirects of the
-    fetch, which |script| does not keep, so it is not repeated here.
+2.  Let |result| be "`Allowed`".
 
-2.  Let |global| be |realm|'s [=realm/global object=].
-
-3.  Let |result| be "`Allowed`".
-
-4.  <a for=list>For each</a> |policy| of |global|'s [=global object/CSP list=]'s
+3.  <a for=list>For each</a> |policy| of |global|'s [=global object/CSP list=]'s
     [=CSP list/policies=]:
 
-    1.  If |script| is given, and the result of executing
-        [[#is-module-script-allowed]] on |script|, |policy|, and |global|'s
-        [=global object/CSP list=]'s [=CSP list/self-origin=] is "`Allowed`",
-        then skip to the next |policy|.
+    1.  Let |source-list| be null.
 
-        Note: This applies only to a script that |realm| did not fetch, being
-        either one recreated when the module was deserialized, or one fetched
-        by another realm.
-
-    2.  Let |source-list| be null.
-
-    3.  If |policy| contains a [=directive=] whose [=directive/name=] is "`script-src`", then
+    2.  If |policy| contains a [=directive=] whose [=directive/name=] is "`script-src`", then
         set |source-list| to that [=directive=]'s [=directive/value=].
 
         Otherwise if |policy| contains a [=directive=] whose [=directive/name=] is
         "`default-src`", then set |source-list| to that directive's [=directive/value=].
 
-    4.  If |source-list| is non-null, and does not contain a [=source
+    3.  If |source-list| is non-null, and does not contain a [=source
         expression=] which is an [=ASCII case-insensitive=] match for the
         string "<a grammar>`'unsafe-eval'`</a>", and does not contain a
         [=source expression=] which is an [=ASCII case-insensitive=] match
@@ -1652,27 +1645,74 @@ and throws a {{WebAssembly.CompileError}} if not:
         4.  If |policy|'s [=content security policy object/disposition=] is "`enforce`", then set |result| to
             "`Blocked`".
 
-5.  If |result| is "`Blocked`", throw a {{WebAssembly.CompileError}} exception.
+4.  If |result| is "`Blocked`", throw a {{WebAssembly.CompileError}} exception.
 
-<h4 id="is-module-script-allowed" algorithm dfn export>
-  Is module |script| allowed by |policy|?
+Note: This algorithm is also used when instantiating a WebAssembly module that
+was not loaded through the module system, since its bytes were provided
+directly by JavaScript code, possibly in another realm.
+
+<h4 id="can-instantiate-wasm-module-script" algorithm dfn export>
+  EnsureCSPDoesNotBlockWasmModuleScriptInstantiation(|realm|, |script|)
 </h4>
 
-Given a [=module script=] |script|, a <a for="/">policy</a> |policy|, and an
-<a>origin</a> |self-origin|, this algorithm returns "`Allowed`" if |policy|
-would allow |script| to be loaded from its URL, and "`Blocked`" otherwise:
+Given a <a>realm</a> |realm| and a [=module script=] |script|, this algorithm
+returns normally if instantiating the WebAssembly module of |script| is
+allowed, and throws a {{WebAssembly.CompileError}} if not:
 
-1.  Let |request| be a new <a for="/">request</a> whose
-    <a for="request">URL</a> is |script|'s <a spec="html" for="script">base URL</a> and
-    <a for="request">destination</a> is "`script`".
+1.  If |script|'s [=module script/realm loaded=] is true, and its
+    [=script/settings object=]'s [=environment settings object's realm|realm=]
+    is |realm|, return.
 
-2.  [=Set up the module script request=] given |request| and |script|'s
+    Note: In this case |script| was fetched by |realm|, and so was already
+    checked against its policy. That check depends on the redirects of the
+    fetch, which |script| does not keep, so it is not repeated here.
+
+2.  Let |global| be |realm|'s [=realm/global object=].
+
+3.  Let |request| be a new <a for="/">request</a> whose
+    <a for="request">URL</a> is |script|'s <a spec="html" for="script">base URL</a>,
+    <a for="request">destination</a> is "`script`", and
+    <a for="request">client</a> is |realm|'s [=realm/settings object=].
+
+4.  [=Set up the module script request=] given |request| and |script|'s
     [=script/fetch options=].
 
-3.  If the result of executing [[#does-request-violate-policy]] on |request|,
-    |policy|, and |self-origin| is "`Does Not Violate`", return "`Allowed`".
+    Note: |script|'s <a spec="html" for="script">base URL</a> is the URL of the
+    response it was created from, after any redirects. As |request| is not
+    redirected, paths are matched against it in full. Module scripts are
+    always [=CORS-same-origin=], so this URL is already
+    observable to |realm|.
 
-4.  Return "`Blocked`".
+5.  Let |result| be "`Allowed`".
+
+6.  <a for=list>For each</a> |policy| of |global|'s [=global object/CSP list=]'s
+    [=CSP list/policies=]:
+
+    1.  If the result of executing [[#does-request-violate-policy]] on
+        |request|, |policy|, and |global|'s [=global object/CSP list=]'s
+        [=CSP list/self-origin=] is "`Does Not Violate`", then
+        [=iteration/continue=].
+
+    2.  Let |source-list| be null.
+
+    3.  If |policy| contains a [=directive=] whose [=directive/name=] is "`script-src`", then
+        set |source-list| to that [=directive=]'s [=directive/value=].
+
+        Otherwise if |policy| contains a [=directive=] whose [=directive/name=] is
+        "`default-src`", then set |source-list| to that directive's [=directive/value=].
+
+    4.  If |source-list| is non-null, and contains a [=source expression=]
+        which is an [=ASCII case-insensitive=] match for the string
+        "<a grammar>`'unsafe-eval'`</a>" or the string
+        "<a grammar>`'wasm-unsafe-eval'`</a>", then [=iteration/continue=].
+
+    5.  Execute [[#report-violation]] on the result of executing
+        [[#create-violation-for-request]] on |request| and |policy|.
+
+    6.  If |policy|'s [=content security policy object/disposition=] is "`enforce`", then set |result| to
+        "`Blocked`".
+
+7.  If |result| is "`Blocked`", throw a {{WebAssembly.CompileError}} exception.
 
 Note: A script recreated when its module was deserialized is not
 <a>"parser-inserted"</a> and has no nonce. As when importing it, any URL is
@@ -2996,7 +3036,7 @@ Content-Type: application/reports+json
      Note: Instantiating a WebAssembly module that was loaded through the
      module system is not gated on these source expressions when its script
      was fetched under this policy, or would be allowed by it, as described in
-     [[#can-compile-wasm-bytes]].
+     [[#can-instantiate-wasm-module-script]].
 
   6.  Navigation to `javascript:` URLs MUST pass through [[#should-block-inline]]. Such navigations
       will only execute script if every policy allows inline script, as per #3 above.
